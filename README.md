@@ -24,11 +24,21 @@ Press `q` or `<Esc>` to close the view.
   dir = "~/task/sources/opensources/nvim-line-history",
   name = "nvim-line-history",
   keys = {
-    { "<leader>gH", mode = "x", desc = "Git line range history" },
+    {
+      "<leader>gH",
+      function()
+        require("line-history").show()
+      end,
+      mode = "x",
+      desc = "Git line range history",
+    },
   },
   opts = {
-    keymap = "<leader>gH",
+    keymap = false,
   },
+  config = function(_, opts)
+    require("line-history").setup(opts)
+  end,
 }
 ```
 
