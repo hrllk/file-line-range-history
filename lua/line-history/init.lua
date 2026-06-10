@@ -351,6 +351,34 @@ local function select_entry(delta)
   render_list()
 end
 
+local function scroll_window(win, delta)
+  if not vim.api.nvim_win_is_valid(win) then
+    return
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(win)
+  local line_count = vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win))
+  local target = math.max(1, math.min(line_count, cursor[1] + delta))
+  vim.api.nvim_win_set_cursor(win, { target, cursor[2] })
+end
+
+local function scroll_preview(direction)
+  local delta = direction * math.max(1, vim.api.nvim_win_get_height(state.wins.asis) - 1)
+
+  scroll_window(state.wins.asis, delta)
+  scroll_window(state.wins.tobe, delta)
+end
+
+local function set_preview_maps()
+  for _, buf in ipairs({ state.bufs.asis, state.bufs.tobe }) do
+    for lhs, direction in pairs({ ["<C-d>"] = 1, ["<C-u>"] = -1 }) do
+      vim.keymap.set("n", lhs, function()
+        scroll_preview(direction)
+      end, { buffer = buf, silent = true, desc = "Scroll line-history preview" })
+    end
+  end
+end
+
 local function set_list_maps()
   local maps = {
     j = 1,
@@ -369,10 +397,16 @@ local function set_list_maps()
     return direction * math.max(1, vim.api.nvim_win_get_height(state.wins.list) - 1)
   end
 
-  for lhs, direction in pairs({ ["<C-d>"] = 1, ["<PageDown>"] = 1, ["<C-u>"] = -1, ["<PageUp>"] = -1 }) do
+  for lhs, direction in pairs({ ["<PageDown>"] = 1, ["<PageUp>"] = -1 }) do
     vim.keymap.set("n", lhs, function()
       select_entry(page_delta(direction))
     end, { buffer = state.bufs.list, silent = true, desc = "Page line-history commits" })
+  end
+
+  for lhs, direction in pairs({ ["<C-d>"] = 1, ["<C-u>"] = -1 }) do
+    vim.keymap.set("n", lhs, function()
+      scroll_preview(direction)
+    end, { buffer = state.bufs.list, silent = true, desc = "Scroll line-history preview" })
   end
 
   set_close_maps(state.bufs.list)
@@ -438,6 +472,7 @@ local function open_layout(entries, title, filetype)
   set_close_maps(state.bufs.asis)
   set_close_maps(state.bufs.tobe)
   set_close_maps(state.bufs.list_header)
+  set_preview_maps()
   set_list_maps()
 
   render_preview()
