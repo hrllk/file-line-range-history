@@ -1,7 +1,7 @@
 local M = {}
 
 local defaults = {
-  keymap = "<leader>gH",
+  keymap = "<leader>gflh",
   command = "LineHistory",
   git = {
     extra_args = { "--patch", "--no-ext-diff" },

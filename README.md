@@ -36,7 +36,7 @@ Preview highlighting:
   },
   keys = {
     {
-      "<leader>gH",
+      "<leader>gflh",
       ":LineHistory<CR>",
       mode = "x",
       desc = "Git line range history",
@@ -58,7 +58,7 @@ Preview highlighting:
 
 1. Open a file inside a Git repository.
 2. Select lines in visual mode.
-3. Press `<leader>gH`.
+3. Press `<leader>gflh`.
 
 ## Limitations
 
