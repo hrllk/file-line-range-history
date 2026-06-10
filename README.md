@@ -37,9 +37,7 @@ Preview highlighting:
   keys = {
     {
       "<leader>gH",
-      function()
-        require("line-history").show()
-      end,
+      ":LineHistory<CR>",
       mode = "x",
       desc = "Git line range history",
     },

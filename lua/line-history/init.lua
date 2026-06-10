@@ -46,11 +46,11 @@ end
 local function current_file()
   local file = vim.api.nvim_buf_get_name(0)
   if file == "" then
-    return nil, "현재 버퍼가 파일에 연결되어 있지 않습니다."
+    return nil, "The current buffer is not backed by a file."
   end
 
   if vim.bo.buftype ~= "" then
-    return nil, "일반 파일 버퍼에서만 사용할 수 있습니다."
+    return nil, "Line history is only available in normal file buffers."
   end
 
   return file, nil
@@ -59,7 +59,7 @@ end
 local function git_root(file)
   local result = vim.system({ "git", "-C", vim.fs.dirname(file), "rev-parse", "--show-toplevel" }, { text = true }):wait()
   if result.code ~= 0 then
-    return nil, vim.trim(result.stderr or "Git 저장소를 찾을 수 없습니다.")
+    return nil, vim.trim(result.stderr or "Could not find a Git repository.")
   end
 
   return vim.trim(result.stdout), nil
@@ -73,14 +73,9 @@ local function relative_path(root, file)
   return vim.fn.fnamemodify(file, ":.")
 end
 
-local function visual_range()
-  local start_pos = vim.fn.getpos("'<")
-  local end_pos = vim.fn.getpos("'>")
-  local start_line = start_pos[2]
-  local end_line = end_pos[2]
-
-  if start_line == 0 or end_line == 0 then
-    return nil, nil, "visual mode에서 라인을 선택한 뒤 실행해주세요."
+local function normalize_range(start_line, end_line)
+  if not start_line or not end_line or start_line == 0 or end_line == 0 then
+    return nil, nil, "Select one or more lines in visual mode before running line history."
   end
 
   if start_line > end_line then
@@ -88,6 +83,15 @@ local function visual_range()
   end
 
   return start_line, end_line, nil
+end
+
+local function visual_range()
+  local start_pos = vim.fn.getpos("'<")
+  local end_pos = vim.fn.getpos("'>")
+  local start_line = start_pos[2]
+  local end_line = end_pos[2]
+
+  return normalize_range(start_line, end_line)
 end
 
 local function set_lines(buf, lines)
@@ -479,14 +483,22 @@ local function open_layout(entries, title, filetype)
   render_list()
 end
 
-function M.show()
+function M.show(opts)
+  opts = opts or {}
+
   local file, file_err = current_file()
   if file_err then
     notify(file_err, vim.log.levels.WARN)
     return
   end
 
-  local start_line, end_line, range_err = visual_range()
+  local start_line, end_line, range_err
+  if opts.start_line and opts.end_line then
+    start_line, end_line, range_err = normalize_range(opts.start_line, opts.end_line)
+  else
+    start_line, end_line, range_err = visual_range()
+  end
+
   if range_err then
     notify(range_err, vim.log.levels.WARN)
     return
@@ -502,13 +514,13 @@ function M.show()
   local filetype = vim.bo.filetype
   local result = run_git_log(root, rel_file, start_line, end_line)
   if result.code ~= 0 then
-    notify(vim.trim(result.stderr or "git log -L 실행에 실패했습니다."), vim.log.levels.ERROR)
+    notify(vim.trim(result.stderr or "Failed to run git log -L."), vim.log.levels.ERROR)
     return
   end
 
   local entries = parse_history(result.stdout or "")
   if #entries == 0 then
-    notify("선택한 라인 범위의 Git 이력을 찾지 못했습니다.", vim.log.levels.INFO)
+    notify("No Git history was found for the selected line range.", vim.log.levels.INFO)
     return
   end
 
@@ -519,14 +531,13 @@ function M.setup(opts)
   merge_config(opts)
   setup_highlights()
 
-  vim.api.nvim_create_user_command(config.command, function()
-    M.show()
+  vim.api.nvim_create_user_command(config.command, function(command)
+    M.show({ start_line = command.line1, end_line = command.line2 })
   end, { range = true, desc = "Show Git history for the selected line range" })
 
   if config.keymap then
     vim.keymap.set("x", config.keymap, function()
-      vim.cmd("normal! gv")
-      M.show()
+      vim.cmd("'<,'>" .. config.command)
     end, { silent = true, desc = "Git line range history" })
   end
 end
