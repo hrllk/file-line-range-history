@@ -12,6 +12,14 @@ local defaults = {
     border = "rounded",
     preview_ratio = 0.68,
   },
+  highlight = {
+    add = { fg = "#7ee787", bg = "#123d2b" },
+    modify = { fg = "#79c0ff", bg = "#14354f" },
+    delete = { fg = "#8b949e", bg = "#2d333b" },
+  },
+  treesitter = {
+    enabled = true,
+  },
 }
 
 local config = vim.deepcopy(defaults)
@@ -26,9 +34,9 @@ local function merge_config(opts)
 end
 
 local function setup_highlights()
-  vim.api.nvim_set_hl(0, "LineHistoryAdd", { link = "DiffAdd", default = true })
-  vim.api.nvim_set_hl(0, "LineHistoryModify", { link = "DiffChange", default = true })
-  vim.api.nvim_set_hl(0, "LineHistoryDelete", { link = "Comment", default = true })
+  vim.api.nvim_set_hl(0, "LineHistoryAdd", config.highlight.add)
+  vim.api.nvim_set_hl(0, "LineHistoryModify", config.highlight.modify)
+  vim.api.nvim_set_hl(0, "LineHistoryDelete", config.highlight.delete)
 end
 
 local function notify(message, level)
@@ -102,6 +110,8 @@ local function set_items(buf, items)
         end_col = #item.text,
         hl_group = item.highlight,
         hl_eol = true,
+        hl_mode = "combine",
+        priority = 200,
       })
     end
   end
@@ -115,8 +125,21 @@ local function create_buffer(filetype)
   return buf
 end
 
+local function start_treesitter(buf, filetype)
+  if not config.treesitter.enabled or filetype == "" then
+    return
+  end
+
+  local language = filetype
+  if vim.treesitter.language and vim.treesitter.language.get_lang then
+    language = vim.treesitter.language.get_lang(filetype) or filetype
+  end
+
+  pcall(vim.treesitter.start, buf, language)
+end
+
 local function open_float(buf, opts)
-  local win = vim.api.nvim_open_win(buf, opts.enter or false, {
+  local win_opts = {
     relative = "editor",
     row = opts.row,
     col = opts.col,
@@ -124,14 +147,20 @@ local function open_float(buf, opts)
     height = opts.height,
     border = config.window.border,
     title = opts.title,
-    title_pos = "center",
     style = "minimal",
-  })
+  }
+
+  if opts.title then
+    win_opts.title_pos = "center"
+  end
+
+  local win = vim.api.nvim_open_win(buf, opts.enter or false, win_opts)
 
   vim.wo[win].wrap = false
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn = "no"
+  vim.wo[win].cursorline = opts.cursorline or false
 
   return win
 end
@@ -284,9 +313,11 @@ local function format_list_line(entry)
 end
 
 local function render_list()
-  local lines = {
+  set_lines(state.bufs.list_header, {
     string.format("%-12s %-12s %-18s %s", "Version", "Date", "Author", "Commit Message"),
-  }
+  })
+
+  local lines = {}
 
   for _, entry in ipairs(state.entries) do
     table.insert(lines, format_list_line(entry))
@@ -295,7 +326,7 @@ local function render_list()
   set_lines(state.bufs.list, lines)
 
   if vim.api.nvim_win_is_valid(state.wins.list) then
-    vim.api.nvim_win_set_cursor(state.wins.list, { state.selected + 1, 0 })
+    vim.api.nvim_win_set_cursor(state.wins.list, { state.selected, 0 })
   end
 end
 
@@ -307,10 +338,10 @@ local function render_preview()
   set_items(state.bufs.tobe, tobe)
 
   if vim.api.nvim_win_is_valid(state.wins.asis) then
-    vim.api.nvim_win_set_config(state.wins.asis, { title = " ASIS " .. entry.parent_short_hash .. " " })
+    vim.api.nvim_win_set_config(state.wins.asis, { title = " SOURCE " .. entry.parent_short_hash .. " " })
   end
   if vim.api.nvim_win_is_valid(state.wins.tobe) then
-    vim.api.nvim_win_set_config(state.wins.tobe, { title = " TOBE " .. entry.short_hash .. " " })
+    vim.api.nvim_win_set_config(state.wins.tobe, { title = " TARGET " .. entry.short_hash .. " " })
   end
 end
 
@@ -334,10 +365,20 @@ local function set_list_maps()
     end, { buffer = state.bufs.list, silent = true, desc = "Select line-history commit" })
   end
 
+  local function page_delta(direction)
+    return direction * math.max(1, vim.api.nvim_win_get_height(state.wins.list) - 1)
+  end
+
+  for lhs, direction in pairs({ ["<C-d>"] = 1, ["<PageDown>"] = 1, ["<C-u>"] = -1, ["<PageUp>"] = -1 }) do
+    vim.keymap.set("n", lhs, function()
+      select_entry(page_delta(direction))
+    end, { buffer = state.bufs.list, silent = true, desc = "Page line-history commits" })
+  end
+
   set_close_maps(state.bufs.list)
 end
 
-local function open_layout(entries, title)
+local function open_layout(entries, title, filetype)
   close_state()
 
   local total_width = math.max(80, math.floor(vim.o.columns * config.window.width))
@@ -345,7 +386,8 @@ local function open_layout(entries, title)
   local row = math.max(0, math.floor((vim.o.lines - total_height) / 2))
   local col = math.max(0, math.floor((vim.o.columns - total_width) / 2))
   local preview_height = math.max(8, math.floor(total_height * config.window.preview_ratio))
-  local list_height = math.max(6, total_height - preview_height - 4)
+  local list_header_height = 1
+  local list_height = math.max(5, total_height - preview_height - list_header_height - 6)
   local left_width = math.floor((total_width - 2) / 2)
   local right_width = total_width - left_width - 2
 
@@ -353,38 +395,49 @@ local function open_layout(entries, title)
     entries = entries,
     selected = 1,
     bufs = {
-      asis = create_buffer("diff"),
-      tobe = create_buffer("diff"),
+      asis = create_buffer(filetype),
+      tobe = create_buffer(filetype),
+      list_header = create_buffer(""),
       list = create_buffer(""),
     },
     wins = {},
   }
+  start_treesitter(state.bufs.asis, filetype)
+  start_treesitter(state.bufs.tobe, filetype)
 
   state.wins.asis = open_float(state.bufs.asis, {
     row = row,
     col = col,
     width = left_width,
     height = preview_height,
-    title = " ASIS ",
+    title = " SOURCE ",
   })
   state.wins.tobe = open_float(state.bufs.tobe, {
     row = row,
     col = col + left_width + 2,
     width = right_width,
     height = preview_height,
-    title = " TOBE ",
+    title = " TARGET ",
   })
-  state.wins.list = open_float(state.bufs.list, {
+  state.wins.list_header = open_float(state.bufs.list_header, {
     row = row + preview_height + 2,
     col = col,
     width = total_width,
-    height = list_height,
+    height = list_header_height,
     title = " " .. title .. " ",
+  })
+  state.wins.list = open_float(state.bufs.list, {
+    row = row + preview_height + list_header_height + 4,
+    col = col,
+    width = total_width,
+    height = list_height,
     enter = true,
+    cursorline = true,
   })
 
   set_close_maps(state.bufs.asis)
   set_close_maps(state.bufs.tobe)
+  set_close_maps(state.bufs.list_header)
   set_list_maps()
 
   render_preview()
@@ -411,6 +464,7 @@ function M.show()
   end
 
   local rel_file = relative_path(root, file)
+  local filetype = vim.bo.filetype
   local result = run_git_log(root, rel_file, start_line, end_line)
   if result.code ~= 0 then
     notify(vim.trim(result.stderr or "git log -L 실행에 실패했습니다."), vim.log.levels.ERROR)
@@ -423,7 +477,7 @@ function M.show()
     return
   end
 
-  open_layout(entries, string.format("%s:%d-%d", rel_file, start_line, end_line))
+  open_layout(entries, string.format("%s:%d-%d", rel_file, start_line, end_line), filetype)
 end
 
 function M.setup(opts)

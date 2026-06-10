@@ -10,18 +10,18 @@ git log -L <start>,<end>:<file> --patch --no-ext-diff
 
 The result is shown in a three-pane floating view:
 
-- `ASIS`: the selected commit's previous line content
-- `TOBE`: the selected commit's resulting line content
+- `SOURCE`: the selected commit's parent line content
+- `TARGET`: the selected commit's resulting line content
 - `Commit list`: commits that touched the selected line range
 
-Use `j`/`k` or the arrow keys in the commit list to move through commits.
+Use `j`/`k`, arrow keys, `<C-d>`/`<C-u>`, or page keys in the commit list to move through commits.
 Press `q` or `<Esc>` to close the view.
 
 Preview highlighting:
 
-- Added lines use `LineHistoryAdd`, linked to `DiffAdd` by default.
-- Modified lines use `LineHistoryModify`, linked to `DiffChange` by default.
-- Deleted lines use `LineHistoryDelete`, linked to `Comment` by default.
+- Added lines use `LineHistoryAdd`, green by default.
+- Modified lines use `LineHistoryModify`, blue by default.
+- Deleted lines use `LineHistoryDelete`, gray by default.
 
 ## lazy.nvim
 
@@ -29,6 +29,9 @@ Preview highlighting:
 {
   dir = "~/task/sources/opensources/nvim-line-history",
   name = "nvim-line-history",
+  dependencies = {
+    "nvim-treesitter/nvim-treesitter",
+  },
   keys = {
     {
       "<leader>gH",
@@ -41,6 +44,9 @@ Preview highlighting:
   },
   opts = {
     keymap = false,
+    treesitter = {
+      enabled = true,
+    },
   },
   config = function(_, opts)
     require("line-history").setup(opts)
