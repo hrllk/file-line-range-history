@@ -17,6 +17,12 @@ The result is shown in a three-pane floating view:
 Use `j`/`k` or the arrow keys in the commit list to move through commits.
 Press `q` or `<Esc>` to close the view.
 
+Preview highlighting:
+
+- Added lines use `LineHistoryAdd`, linked to `DiffAdd` by default.
+- Modified lines use `LineHistoryModify`, linked to `DiffChange` by default.
+- Deleted lines use `LineHistoryDelete`, linked to `Comment` by default.
+
 ## lazy.nvim
 
 ```lua

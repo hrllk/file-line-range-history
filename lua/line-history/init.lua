@@ -16,12 +16,19 @@ local defaults = {
 
 local config = vim.deepcopy(defaults)
 local state = nil
+local namespace = vim.api.nvim_create_namespace("line-history")
 
 local RECORD_SEPARATOR = string.char(31)
 local FIELD_SEPARATOR = string.char(0)
 
 local function merge_config(opts)
   config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), opts or {})
+end
+
+local function setup_highlights()
+  vim.api.nvim_set_hl(0, "LineHistoryAdd", { link = "DiffAdd", default = true })
+  vim.api.nvim_set_hl(0, "LineHistoryModify", { link = "DiffChange", default = true })
+  vim.api.nvim_set_hl(0, "LineHistoryDelete", { link = "Comment", default = true })
 end
 
 local function notify(message, level)
@@ -81,6 +88,25 @@ local function set_lines(buf, lines)
   vim.bo[buf].modifiable = false
 end
 
+local function set_items(buf, items)
+  local lines = vim.tbl_map(function(item)
+    return item.text
+  end, items)
+
+  set_lines(buf, lines)
+  vim.api.nvim_buf_clear_namespace(buf, namespace, 0, -1)
+
+  for idx, item in ipairs(items) do
+    if item.highlight then
+      vim.api.nvim_buf_set_extmark(buf, namespace, idx - 1, 0, {
+        end_col = #item.text,
+        hl_group = item.highlight,
+        hl_eol = true,
+      })
+    end
+  end
+end
+
 local function create_buffer(filetype)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].bufhidden = "wipe"
@@ -138,7 +164,7 @@ local function run_git_log(root, file, start_line, end_line)
     root,
     "log",
     "--date=short",
-    "--format=" .. RECORD_SEPARATOR .. "%H%x00%h%x00%an%x00%ad%x00%s",
+    "--format=" .. RECORD_SEPARATOR .. "%H%x00%h%x00%P%x00%an%x00%ad%x00%s",
     "-L",
     range,
   }
@@ -159,13 +185,17 @@ local function parse_history(output)
     local patch = first_newline and block:sub(first_newline + 1) or ""
     local fields = vim.split(metadata, FIELD_SEPARATOR, { plain = true })
 
-    if #fields >= 5 then
+    if #fields >= 6 then
+      local parent_hash = vim.split(fields[3], " ", { plain = true })[1] or ""
+
       table.insert(entries, {
         hash = fields[1],
         short_hash = fields[2],
-        author = fields[3],
-        date = fields[4],
-        message = fields[5],
+        parent_hash = parent_hash,
+        parent_short_hash = parent_hash == "" and "empty" or parent_hash:sub(1, 7),
+        author = fields[4],
+        date = fields[5],
+        message = fields[6],
         patch = patch,
       })
     end
@@ -191,13 +221,25 @@ end
 
 local function flush_change_group(asis, tobe, removed, added)
   local max_count = math.max(#removed, #added)
+
   for i = 1, max_count do
-    table.insert(asis, removed[i] or "")
-    table.insert(tobe, added[i] or "")
+    local removed_line = removed[i]
+    local added_line = added[i]
+
+    if removed_line and added_line then
+      table.insert(asis, { text = removed_line, highlight = "LineHistoryModify" })
+      table.insert(tobe, { text = added_line, highlight = "LineHistoryModify" })
+    elseif removed_line then
+      table.insert(asis, { text = removed_line, highlight = "LineHistoryDelete" })
+      table.insert(tobe, { text = "", highlight = nil })
+    elseif added_line then
+      table.insert(asis, { text = "", highlight = nil })
+      table.insert(tobe, { text = added_line, highlight = "LineHistoryAdd" })
+    end
   end
 end
 
-local function side_by_side_lines(patch)
+local function side_by_side_items(patch)
   local asis = {}
   local tobe = {}
   local removed = {}
@@ -214,24 +256,24 @@ local function side_by_side_lines(patch)
   for _, line in ipairs(hunk_lines(patch)) do
     if line:match("^@@") then
       flush()
-      table.insert(asis, line)
-      table.insert(tobe, line)
+      table.insert(asis, { text = line, highlight = nil })
+      table.insert(tobe, { text = line, highlight = nil })
     elseif line:sub(1, 1) == "-" then
       table.insert(removed, line:sub(2))
     elseif line:sub(1, 1) == "+" then
       table.insert(added, line:sub(2))
     elseif line:sub(1, 1) == " " then
       flush()
-      table.insert(asis, line:sub(2))
-      table.insert(tobe, line:sub(2))
+      table.insert(asis, { text = line:sub(2), highlight = nil })
+      table.insert(tobe, { text = line:sub(2), highlight = nil })
     end
   end
 
   flush()
 
   if #asis == 0 and #tobe == 0 then
-    asis = { "No patch content." }
-    tobe = { "No patch content." }
+    asis = { { text = "No patch content.", highlight = nil } }
+    tobe = { { text = "No patch content.", highlight = nil } }
   end
 
   return asis, tobe
@@ -259,13 +301,13 @@ end
 
 local function render_preview()
   local entry = state.entries[state.selected]
-  local asis, tobe = side_by_side_lines(entry.patch)
+  local asis, tobe = side_by_side_items(entry.patch)
 
-  set_lines(state.bufs.asis, asis)
-  set_lines(state.bufs.tobe, tobe)
+  set_items(state.bufs.asis, asis)
+  set_items(state.bufs.tobe, tobe)
 
   if vim.api.nvim_win_is_valid(state.wins.asis) then
-    vim.api.nvim_win_set_config(state.wins.asis, { title = " ASIS " .. entry.short_hash .. "^ " })
+    vim.api.nvim_win_set_config(state.wins.asis, { title = " ASIS " .. entry.parent_short_hash .. " " })
   end
   if vim.api.nvim_win_is_valid(state.wins.tobe) then
     vim.api.nvim_win_set_config(state.wins.tobe, { title = " TOBE " .. entry.short_hash .. " " })
@@ -386,6 +428,7 @@ end
 
 function M.setup(opts)
   merge_config(opts)
+  setup_highlights()
 
   vim.api.nvim_create_user_command(config.command, function()
     M.show()
