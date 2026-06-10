@@ -1,4 +1,4 @@
-# nvim-line-history
+# file-line-range-history
 
 Small Neovim plugin for showing Git history for a selected line range.
 
@@ -32,8 +32,7 @@ Preview highlighting:
 
 ```lua
 {
-  dir = "~/task/sources/opensources/nvim-line-history",
-  name = "nvim-line-history",
+  "hrllk/file-line-range-history",
   dependencies = {
     "nvim-treesitter/nvim-treesitter",
   },
