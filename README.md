@@ -2,6 +2,10 @@
 
 Small Neovim plugin for showing Git history for a selected line range.
 
+## Demo
+
+![Demo](assets/demo.png)
+
 The plugin reads the current visual selection and runs:
 
 ```sh
