@@ -25,6 +25,7 @@ local defaults = {
 local config = vim.deepcopy(defaults)
 local state = nil
 local namespace = vim.api.nvim_create_namespace("line-history")
+local render_list
 
 local RECORD_SEPARATOR = string.char(31)
 local FIELD_SEPARATOR = string.char(0)
@@ -167,6 +168,94 @@ local function open_float(buf, opts)
   vim.wo[win].cursorline = opts.cursorline or false
 
   return win
+end
+
+local function calculate_layout()
+  local available_width = math.max(20, vim.o.columns)
+  local available_height = math.max(12, vim.o.lines - vim.o.cmdheight)
+  local total_width = math.floor(available_width * config.window.width)
+  local total_height = math.floor(available_height * config.window.height)
+
+  total_width = math.max(20, math.min(available_width, total_width))
+  total_height = math.max(12, math.min(available_height, total_height))
+
+  local preview_height = math.max(4, math.floor(total_height * config.window.preview_ratio))
+  local list_header_height = 1
+  local list_height = math.max(3, total_height - preview_height - list_header_height - 6)
+
+  if preview_height + list_header_height + list_height + 6 > total_height then
+    preview_height = math.max(4, total_height - list_header_height - list_height - 6)
+  end
+
+  local left_width = math.max(1, math.floor((total_width - 2) / 2))
+  local right_width = math.max(1, total_width - left_width - 2)
+
+  return {
+    total_width = total_width,
+    total_height = total_height,
+    row = math.max(0, math.floor((available_height - total_height) / 2)),
+    col = math.max(0, math.floor((available_width - total_width) / 2)),
+    preview_height = preview_height,
+    list_header_height = list_header_height,
+    list_height = list_height,
+    left_width = left_width,
+    right_width = right_width,
+  }
+end
+
+local function window_config(layout, key)
+  if key == "asis" then
+    return {
+      relative = "editor",
+      row = layout.row,
+      col = layout.col,
+      width = layout.left_width,
+      height = layout.preview_height,
+    }
+  end
+
+  if key == "tobe" then
+    return {
+      relative = "editor",
+      row = layout.row,
+      col = layout.col + layout.left_width + 2,
+      width = layout.right_width,
+      height = layout.preview_height,
+    }
+  end
+
+  if key == "list_header" then
+    return {
+      relative = "editor",
+      row = layout.row + layout.preview_height + 2,
+      col = layout.col,
+      width = layout.total_width,
+      height = layout.list_header_height,
+    }
+  end
+
+  return {
+    relative = "editor",
+    row = layout.row + layout.preview_height + layout.list_header_height + 4,
+    col = layout.col,
+    width = layout.total_width,
+    height = layout.list_height,
+  }
+end
+
+local function resize_layout()
+  if not state then
+    return
+  end
+
+  local layout = calculate_layout()
+  for key, win in pairs(state.wins or {}) do
+    if vim.api.nvim_win_is_valid(win) then
+      vim.api.nvim_win_set_config(win, window_config(layout, key))
+    end
+  end
+
+  render_list()
 end
 
 local function close_state()
@@ -316,7 +405,7 @@ local function format_list_line(entry)
   return string.format("%-12s %-12s %-18s %s", entry.short_hash, entry.date, entry.author, entry.message)
 end
 
-local function render_list()
+render_list = function()
   set_lines(state.bufs.list_header, {
     string.format("%-12s %-12s %-18s %s", "Version", "Date", "Author", "Commit Message"),
   })
@@ -419,15 +508,7 @@ end
 local function open_layout(entries, title, filetype)
   close_state()
 
-  local total_width = math.max(80, math.floor(vim.o.columns * config.window.width))
-  local total_height = math.max(20, math.floor((vim.o.lines - vim.o.cmdheight) * config.window.height))
-  local row = math.max(0, math.floor((vim.o.lines - total_height) / 2))
-  local col = math.max(0, math.floor((vim.o.columns - total_width) / 2))
-  local preview_height = math.max(8, math.floor(total_height * config.window.preview_ratio))
-  local list_header_height = 1
-  local list_height = math.max(5, total_height - preview_height - list_header_height - 6)
-  local left_width = math.floor((total_width - 2) / 2)
-  local right_width = total_width - left_width - 2
+  local layout = calculate_layout()
 
   state = {
     entries = entries,
@@ -443,35 +524,19 @@ local function open_layout(entries, title, filetype)
   start_treesitter(state.bufs.asis, filetype)
   start_treesitter(state.bufs.tobe, filetype)
 
-  state.wins.asis = open_float(state.bufs.asis, {
-    row = row,
-    col = col,
-    width = left_width,
-    height = preview_height,
+  state.wins.asis = open_float(state.bufs.asis, vim.tbl_extend("force", window_config(layout, "asis"), {
     title = " SOURCE ",
-  })
-  state.wins.tobe = open_float(state.bufs.tobe, {
-    row = row,
-    col = col + left_width + 2,
-    width = right_width,
-    height = preview_height,
+  }))
+  state.wins.tobe = open_float(state.bufs.tobe, vim.tbl_extend("force", window_config(layout, "tobe"), {
     title = " TARGET ",
-  })
-  state.wins.list_header = open_float(state.bufs.list_header, {
-    row = row + preview_height + 2,
-    col = col,
-    width = total_width,
-    height = list_header_height,
+  }))
+  state.wins.list_header = open_float(state.bufs.list_header, vim.tbl_extend("force", window_config(layout, "list_header"), {
     title = " " .. title .. " ",
-  })
-  state.wins.list = open_float(state.bufs.list, {
-    row = row + preview_height + list_header_height + 4,
-    col = col,
-    width = total_width,
-    height = list_height,
+  }))
+  state.wins.list = open_float(state.bufs.list, vim.tbl_extend("force", window_config(layout, "list"), {
     enter = true,
     cursorline = true,
-  })
+  }))
 
   set_close_maps(state.bufs.asis)
   set_close_maps(state.bufs.tobe)
@@ -530,6 +595,12 @@ end
 function M.setup(opts)
   merge_config(opts)
   setup_highlights()
+
+  local group = vim.api.nvim_create_augroup("LineHistory", { clear = true })
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = group,
+    callback = resize_layout,
+  })
 
   vim.api.nvim_create_user_command(config.command, function(command)
     M.show({ start_line = command.line1, end_line = command.line2 })

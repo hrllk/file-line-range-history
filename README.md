@@ -19,6 +19,9 @@ Use `<C-d>`/`<C-u>` to scroll the `SOURCE` and `TARGET` preview panes together.
 Use page keys to move through the commit list by page.
 Press `q` or `<Esc>` to close the view.
 
+The floating layout automatically resizes when Neovim receives `VimResized`,
+including terminal or tmux pane size changes.
+
 Preview highlighting:
 
 - Added lines use `LineHistoryAdd`, green by default.
