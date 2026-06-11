@@ -180,6 +180,22 @@ function View:render_list(entries, selected, format_line)
   end
 end
 
+function View:focus_list()
+  if vim.api.nvim_win_is_valid(self.wins.list) then
+    vim.api.nvim_set_current_win(self.wins.list)
+  end
+end
+
+function View:contains_win(win)
+  for _, line_history_win in pairs(self.wins) do
+    if line_history_win == win and vim.api.nvim_win_is_valid(line_history_win) then
+      return true
+    end
+  end
+
+  return false
+end
+
 function View:render_preview(entry, source_items, target_items)
   set_items(self.buffers.source, self.namespace, source_items)
   set_items(self.buffers.target, self.namespace, target_items)

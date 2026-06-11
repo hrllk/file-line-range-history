@@ -102,6 +102,18 @@ function Session:resize()
   self.view:render_list(self.entries, self.selected, Presenter.format_list_line)
 end
 
+function Session:focus()
+  if self.closed then
+    return
+  end
+
+  if self.view:contains_win(vim.api.nvim_get_current_win()) then
+    return
+  end
+
+  self.view:focus_list()
+end
+
 function Session:close()
   if self.closed then
     return

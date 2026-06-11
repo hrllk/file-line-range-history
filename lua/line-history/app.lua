@@ -93,12 +93,24 @@ function App:resize_session()
   end
 end
 
+function App:focus_session()
+  if self.session then
+    self.session:focus()
+  end
+end
+
 function App:register_autocmds()
   local group = vim.api.nvim_create_augroup("LineHistory", { clear = true })
   vim.api.nvim_create_autocmd("VimResized", {
     group = group,
     callback = function()
       self:resize_session()
+    end,
+  })
+  vim.api.nvim_create_autocmd("FocusGained", {
+    group = group,
+    callback = function()
+      self:focus_session()
     end,
   })
 end
